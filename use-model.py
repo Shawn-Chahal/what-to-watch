@@ -46,13 +46,13 @@ movie_counts = csr_matrix((movies_count_values, ([0] * len(movies_count_keys), m
 movie_ids_top = np.argsort(movie_counts)[::-1][:num_top_movies]
 
 movie_survey_id = []
+movie_survey_title = []
 
 for movie_id in rng.choice(movie_ids_top, survey_length, replace=False):
     if movie_id <= max_movieid:
         movie_survey_id.append(int(movie_id))
-
-movie_survey_docs = mycol_movies.find({'_id': {'$in': movie_survey_id}})
-movie_survey_title = [doc['title'] for doc in movie_survey_docs]
+        doc = mycol_movies.find_one({'_id': int(movie_id)})
+        movie_survey_title.append(doc['title'])
 
 user_ratings = []
 
