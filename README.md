@@ -1,6 +1,6 @@
 # What to watch?
 
-This repository builds the database an front end which is used in the [What to watch?](https://www.shawnchahal.com/what-to-watch) web app.
+This repository builds the database and front end which is used in the [What to watch?](https://www.shawnchahal.com/what-to-watch) web app.
 
 ## What does the app do?
 
