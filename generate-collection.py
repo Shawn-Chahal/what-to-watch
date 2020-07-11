@@ -4,7 +4,7 @@ import os
 import pandas as pd
 import pymongo
 
-myclient = pymongo.MongoClient(uri, retryWrites=False)
+myclient = pymongo.MongoClient(uri)
 mydb = myclient.get_default_database()
 mycol_ratings = mydb['ratings']
 mycol_movies = mydb['movies']
@@ -19,7 +19,7 @@ df['rating'] = (df['rating'].to_numpy() - rating_min) / (rating_max - rating_min
 users_list = list(df['userId'])
 users_count = Counter(users_list)
 
-num_users = 10000
+num_users = 20000
 
 df_count = pd.DataFrame.from_dict(users_count, orient='index', columns=['count'])
 df_count.sort_values(by=['count'], ascending=False, inplace=True)
