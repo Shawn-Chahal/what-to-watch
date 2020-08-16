@@ -4,52 +4,25 @@ import numpy as np
 from scipy.sparse import csr_matrix
 import pymongo
 
-num_users = 1000
-survey_length = 50
-num_top_movies = 1000
-num_results = 25
+MIN_RATINGS = 1000
+SURVEY_LENGTH = 64
+NUM_RESULTS = 32
 
-num_top_match = 30
-bias = 0.3
-min_count = 3
-
-rng = np.random.default_rng()
+NUM_USERS = 1000
+NUM_TOP_MATCH = 50
+BIAS = 1.0
 
 myclient = pymongo.MongoClient(uri, retryWrites=False)
 mydb = myclient.get_default_database()
 mycol_ratings = mydb['ratings']
 mycol_movies = mydb['movies']
-mydocs_ratings = mycol_ratings.aggregate([{'$sample': {'size': num_users}}])
-
-csr_userid = []
-csr_movieid = []
-csr_rating = []
-
-for document in mydocs_ratings:
-    doc_userid = document['_id']
-    doc_movieid = document['movieId']
-    doc_rating = document['rating']
-
-    csr_userid.extend([doc_userid] * len(doc_rating))
-    csr_movieid.extend(doc_movieid)
-    csr_rating.extend(doc_rating)
-
-movies_count = Counter(csr_movieid)
-movies_count_keys = list(movies_count.keys())
-movies_count_values = list(movies_count.values())
-
-movie_counts = csr_matrix((movies_count_values, ([0] * len(movies_count_keys), movies_count_keys))).toarray()[0]
-
-max_movieid = movie_counts.shape[0]
-
-movie_ids_top = np.argsort(movie_counts)[::-1][:num_top_movies]
-
+mydocs_survey = mycol_movies.aggregate([{'$match': {'ratings-count': {'$gte': MIN_RATINGS}}},
+                                        {'$sample': {'size': SURVEY_LENGTH}}])
 movie_survey_id = []
 movie_survey_title = []
 
-for movie_id in rng.choice(movie_ids_top, survey_length, replace=False):
-    movie_survey_id.append(int(movie_id))
-    doc = mycol_movies.find_one({'_id': int(movie_id)})
+for doc in mydocs_survey:
+    movie_survey_id.append(doc['_id'])
     movie_survey_title.append(doc['title'])
 
 # USER INPUT STARTS
@@ -76,29 +49,38 @@ if sum([abs(i) for i in user_ratings]) == 0:
 
 else:
 
-    if max(movie_survey_id) > max_movieid:
-        max_movieid = max(movie_survey_id)
+    mydocs_similar_users = mycol_ratings.aggregate([{'$match': {'movieId': {'$in': movie_survey_id}}},
+                                                    {'$sample': {'size': NUM_USERS}}])
 
     if year_max < year_min:
         year_max = year_min
 
-    X = csr_matrix((csr_rating, (csr_userid, csr_movieid)), shape=(max(csr_userid) + 1, max_movieid + 1))
+    csr_userid = []
+    csr_movieid = []
+    csr_rating = []
+
+    for document in mydocs_similar_users:
+        csr_userid.extend([document['_id']] * len(document['rating']))
+        csr_movieid.extend(document['movieId'])
+        csr_rating.extend(document['rating'])
+
+    X = csr_matrix((csr_rating, (csr_userid, csr_movieid)),
+                   shape=(max(csr_userid) + 1, max(csr_movieid + movie_survey_id) + 1))
 
     user_vector = csr_matrix((user_ratings, ([0] * len(movie_survey_id), movie_survey_id)),
-                             shape=(1, max_movieid + 1)).toarray()[0]
+                             shape=(1, max(csr_movieid + movie_survey_id) + 1)).toarray()[0]
 
     match = X.dot(user_vector)
-    match_idx = np.argsort(match)[::-1][:num_top_match]
+    match_idx = np.argsort(match)[::-1][:NUM_TOP_MATCH]
     match_sum = np.sum(match[match_idx])
-
     if match_sum == 0:
         match_sum = 1
 
-    match_proba = np.reshape(match[match_idx] / match_sum * num_top_match, (-1, 1))
+    match_proba = np.reshape(match[match_idx] / match_sum * NUM_TOP_MATCH, (-1, 1))
 
     results_nnz = X[match_idx].getnnz(axis=0)
     results_sum = X[match_idx].multiply(match_proba).sum(axis=0)
-    results_vector = np.array((results_sum[0] / (results_nnz + bias)))[0]
+    results_vector = np.array((results_sum[0] / (results_nnz + BIAS)))[0]
     result_ids = np.argsort(results_vector)[::-1]
 
     results_count = 0
@@ -111,30 +93,30 @@ else:
     for movie_id in result_ids[:1000]:
 
         if user_vector[movie_id] == 0:
-            if results_nnz[movie_id] >= min_count:
-                doc = mycol_movies.find_one({'_id': int(movie_id)})
 
-                if doc is not None:
+            doc = mycol_movies.find_one({'_id': int(movie_id)})
 
-                    title = doc['title']
-                    youtube_id = doc['youtubeId']
-                    imdb_id = doc['imdbId']
+            if doc is not None:
 
-                    if title[-1] == ')':
-                        title_year = int(title[-5:-1])
+                title = doc['title']
+                youtube_id = doc['youtubeId']
+                imdb_id = doc['imdbId']
 
-                        if year_min <= title_year <= year_max:
+                if title[-1] == ')':
+                    title_year = int(title[-5:-1])
 
-                            percent_match.append(
-                                f'{results_vector[movie_id] / results_vector[result_ids[0]] * 0.99:.0%} match')
-                            movie_title.append(title)
-                            imdb_link.append(f'https://www.imdb.com/title/tt{imdb_id}')
-                            youtube_link.append(youtube_id)
+                    if year_min <= title_year <= year_max:
 
-                            results_count += 1
+                        percent_match.append(
+                            f'{results_vector[movie_id] / results_vector[result_ids[0]] * 0.99:.0%} match')
+                        movie_title.append(title)
+                        imdb_link.append(f'https://www.imdb.com/title/tt{imdb_id}')
+                        youtube_link.append(f'https://www.youtube.com/watch?v={youtube_id}')
 
-                            if results_count == num_results:
-                                break
+                        results_count += 1
+
+                        if results_count == NUM_RESULTS:
+                            break
 
 # RESULTS
 
@@ -144,5 +126,5 @@ for i in range(results_count):
     print(movie_title[i])
     print(percent_match[i])
     print(imdb_link[i])
-    print(f'https://www.youtube.com/watch?v={youtube_link[i]}')
+    print(youtube_link[i])
     print('\n----------------------------------------\n')
