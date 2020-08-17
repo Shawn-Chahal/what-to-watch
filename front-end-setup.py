@@ -1,5 +1,4 @@
 from uri import uri
-from collections import Counter
 import numpy as np
 from scipy.sparse import csr_matrix
 import pymongo
